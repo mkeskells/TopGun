@@ -14,6 +14,7 @@ case class CallSite private(packageName:String, className: String, methodName:St
 
 class CallSiteInfo {
   var cpuTicks = 0
+  var firstUserCpuTicks = 0
 }
 class CpuTicks {
   var totalTransitive = 0
