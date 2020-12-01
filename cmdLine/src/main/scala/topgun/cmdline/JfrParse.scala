@@ -9,6 +9,7 @@ object JfrParse extends App {
   val parser = new CmdLineParser(options)
   try {
     parser.parseArgument(args: _*)
+    options.validate(parser)
     new JfrReader(options).process()
   } catch {
     case e: CmdLineException =>
