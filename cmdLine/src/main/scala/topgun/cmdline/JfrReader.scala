@@ -24,7 +24,8 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     val files:List[File] = if (cmdLine.jfr.isDirectory)
       cmdLine.jfr.listFiles().toList.filter(f => f.isFile && f.getName.endsWith(".jfr"))
     else List(cmdLine.jfr)
-    
+
+
     files.foreach {file =>
       new FileParser(file, cmdLine, totals, configuration).parse()
     }
