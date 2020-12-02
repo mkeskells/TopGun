@@ -3,6 +3,7 @@ package topgun.cmdline
 import java.io.File
 
 import jdk.jfr.consumer.{RecordedClass, RecordedEvent, RecordedFrame, RecordingFile}
+import topgun.cmdline.records.{AsmRecord, ClassInfo}
 import topgun.core.CallSite
 
 import scala.jdk.CollectionConverters._
@@ -153,6 +154,11 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
       stack.getFrames.iterator.asScala.map {
         frame: RecordedFrame =>
           val method = frame.getMethod
+          print("@@@@NAME-")
+          println(method.getType.getName)
+          val classInfo = AsmRecord.getRecord(method.getType.getName);
+          if(classInfo.isValid)
+          println("*************" + classInfo)
 
           CallSite("", method.getType.getName, method.getName, method.getDescriptor, frame.getLineNumber)
       }.distinct.takeWhile { f => !f.isIgnorableTopFrame }.toList
