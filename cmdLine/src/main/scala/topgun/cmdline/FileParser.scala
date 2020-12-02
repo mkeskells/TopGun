@@ -19,17 +19,12 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     try {
       val recording = new RecordingFile(file.toPath);
 
-      for (t <- recording.readEventTypes().asScala) {
-        println(t.getName)
-      }
       val view = RecordingFile.readAllEvents(file.toPath);
-      view.asScala.find(_.getEventType.getName == "GC TLAB Configuration") match {
+      view.asScala.find(_.getEventType.getLabel == "GC TLAB Configuration") match {
         case Some(e) => handleTlabConfiguration(e)
         case _ => {  }
       }
-      println("**********************************")
       for (event <- view.asScala) {
-        println(event.getEventType.getLabel)
         event.getEventType.getLabel match {
           case "Allocation in new TLAB" => allocation(event, true)
           case "Allocation outside TLAB" => allocation(event, false)
@@ -45,7 +40,6 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
         }
         totals.totalEvents.incrementAndGet()
       }
-      println("######################################")
     } catch {
       case e: Exception => e.printStackTrace()
     }
@@ -53,9 +47,8 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
 
   var tlabSize = 2048L
 
+//  OUR JFR FILE NEVER INVOKED THIS METHOD. WE CANNOT CONFIRM IF THE VALUE'S NAME HAS BEEN CHANGED IN THE JAVA 11 APIS { 'usesTLABs' , 'minTLABSize' }
   def handleTlabConfiguration(event: RecordedEvent): Unit = {
-    println("TLABS")
-    println(event.getFields)
     //we get this event early in the JFR file
 
     val usesTlab = event.getValue("usesTLABs").asInstanceOf[Boolean]
