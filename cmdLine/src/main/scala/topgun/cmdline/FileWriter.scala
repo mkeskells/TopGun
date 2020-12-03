@@ -120,4 +120,3 @@ object FileWriter {
     files.clear()
   }
 }
-

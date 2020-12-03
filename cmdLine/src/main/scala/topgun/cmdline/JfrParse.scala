@@ -18,5 +18,4 @@ object JfrParse extends App {
       System.err.println(e.getMessage)
       parser.printUsage(System.err)
   }
-
 }
