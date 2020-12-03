@@ -1,9 +1,9 @@
 package topgun.cmdline
 
 import java.io.File
+import java.util.stream.Collectors
 
 import jdk.jfr.consumer.{RecordedClass, RecordedEvent, RecordedFrame, RecordingFile}
-import topgun.cmdline.records.{AsmRecord, ClassInfo}
 import topgun.core.CallSite
 
 import scala.jdk.CollectionConverters._
@@ -11,6 +11,22 @@ import scala.jdk.CollectionConverters._
 class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, configuration: Configuration) {
 
   import configuration.{includeStack, includeThread}
+
+  def verify(recordingFile: RecordingFile): Boolean = {
+
+    val allEventsTypes = recordingFile.readEventTypes();
+    val eventTypes = allEventsTypes.stream().map(eventType => eventType.getLabel).collect(Collectors.toList[String])
+    if(!eventTypes.contains("Allocation in new TLAB")){
+      throw new JfrEventNotFoundException("'Allocation in new TLAB' Event not found")
+    }
+    if(!eventTypes.contains("Allocation outside TLAB")){
+      throw new JfrEventNotFoundException("'Allocation outside TLAB' Event not found")
+    }
+    if(!eventTypes.contains("Method Profiling Sample")){
+      throw new JfrEventNotFoundException("'Method Profiling Sample' Event not found")
+    }
+    return true;
+  }
 
   def parse(): Unit = {
 
@@ -20,11 +36,16 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     try {
       val recording = new RecordingFile(file.toPath);
 
-      val view = RecordingFile.readAllEvents(file.toPath);
-      view.asScala.find(_.getEventType.getLabel == "GC TLAB Configuration") match {
-        case Some(e) => handleTlabConfiguration(e)
-        case _ => {  }
+      try{
+        verify(recording)
+      }catch{
+        case e: JfrEventNotFoundException => {
+          System.err.printf("Failed: [file]-%s%nReason: %s",file.getName,e.getMessage);
+          System.exit(-1)
+        }
       }
+
+      val view = RecordingFile.readAllEvents(file.toPath);
       for (event <- view.asScala) {
         event.getEventType.getLabel match {
           case "Allocation in new TLAB" => allocation(event, true)
@@ -46,19 +67,6 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     }
   }
 
-  var tlabSize = 2048L
-
-//  OUR JFR FILE NEVER INVOKED THIS METHOD. WE CANNOT CONFIRM IF THE VALUE'S NAME HAS BEEN CHANGED IN THE JAVA 11 APIS { 'usesTLABs' , 'minTLABSize' }
-  def handleTlabConfiguration(event: RecordedEvent): Unit = {
-    //we get this event early in the JFR file
-
-    val usesTlab = event.getValue("usesTLABs").asInstanceOf[Boolean]
-    if (usesTlab) {
-      tlabSize = event.getValue("minTLABSize").asInstanceOf[Long]
-    }
-  }
-
-
   def addDerated(frames: Seq[CallSite], value: Long)
                 (fn: (CallSite, Double) => Unit) = {
     val step = 1.0D / frames.size
@@ -78,17 +86,18 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
       if (!includeStack(distinctFrames)) {
         totals.ignoredStackAllocationEvents.incrementAndGet()
       } else {
-
         totals.consumedAllocationEvents.incrementAndGet()
         val distinctUserFrames: List[CallSite] = distinctFrames.filter(_.isUserFrame)
         val cls = event.getValue("objectClass").asInstanceOf[RecordedClass]
         val clazz = cls.getName
         val detectedAllocation = event.getValue("allocationSize").asInstanceOf[Long]
+
         val allocatedBytes = if (isTLAB) {
           //we will only see an allocation of size n for
           //tlabSize/n of the allocations
           //so we record that as  tlabSize/n*n = tlabSize
-          tlabSize
+
+          event.getValue("tlabSize").asInstanceOf[Long]
         } else detectedAllocation
 
         totals.recordClassAllocation(clazz, allocatedBytes, detectedAllocation)
@@ -146,7 +155,6 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     }
   }
 
-
   private def readFrames(event: RecordedEvent): List[CallSite] = {
     val stack = event.getStackTrace
 
@@ -154,16 +162,8 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
       stack.getFrames.iterator.asScala.map {
         frame: RecordedFrame =>
           val method = frame.getMethod
-          print("@@@@NAME-")
-          println(method.getType.getName)
-          val classInfo = AsmRecord.getRecord(method.getType.getName);
-          if(classInfo.isValid)
-          println("*************" + classInfo)
-
-          CallSite("", method.getType.getName, method.getName, method.getDescriptor, frame.getLineNumber)
+          CallSite(method.getType.getName, method.getName, method.getName, method.getDescriptor, frame.getLineNumber)
       }.distinct.takeWhile { f => !f.isIgnorableTopFrame }.toList
     }
   }
-
-
 }
