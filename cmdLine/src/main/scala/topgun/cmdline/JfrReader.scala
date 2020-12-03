@@ -75,5 +75,4 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     System.out.println(s"Allocation - ignored (stack)  ${totals.ignoredStackAllocationEvents}  events")
     System.out.println(s"Allocation - ignored (thread) ${totals.ignoredThreadAllocationEvents}  events")
   }
-
 }

@@ -28,7 +28,6 @@ public class AggregateViewOptionHandler extends OptionHandler {
         }
         setter.addValue(result);
         return next;
-//        ClassLoader.getSystemResourceAsStream()
     }
 
     @Override

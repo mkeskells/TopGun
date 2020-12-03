@@ -2,7 +2,7 @@ package topgun.cmdline
 
 import java.io.File
 import java.util.stream.Collectors
-
+import java.util
 import jdk.jfr.consumer.{RecordedClass, RecordedEvent, RecordedFrame, RecordingFile}
 import topgun.core.CallSite
 
@@ -12,42 +12,35 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
 
   import configuration.{includeStack, includeThread}
 
-  def verify(recordingFile: RecordingFile): Boolean = {
+  def verify(eventList: util.List[RecordedEvent]): Boolean = {
 
-    val allEventsTypes = recordingFile.readEventTypes();
-
-    val eventTypes = allEventsTypes.stream().map(eventType => eventType.getLabel).collect(Collectors.toSet[String])
+    val eventTypes = eventList.stream().map(event => event.getEventType.getLabel).distinct().collect(Collectors.toSet[String])
 
     if(!eventTypes.contains("Allocation in new TLAB")){
-      throw new JfrEventNotFoundException("'Allocation in new TLAB' Event not found")
+      throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not found")
     }
     if(!eventTypes.contains("Allocation outside TLAB")){
-      throw new JfrEventNotFoundException("'Allocation outside TLAB' Event not found")
+      throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not found")
     }
     if(!eventTypes.contains("Method Profiling Sample")){
-      throw new JfrEventNotFoundException("'Method Profiling Sample' Event not found")
+      throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Method Profiling Sample' event not found")
     }
     return true;
   }
 
   def parse(): Unit = {
 
-
-
     println(s"*** File $file")
     try {
-      val recording = new RecordingFile(file.toPath);
-
+      val view = RecordingFile.readAllEvents(file.toPath);
       try{
-        verify(recording)
+        verify(view)
       }catch{
         case e: JfrEventNotFoundException => {
-          System.err.printf("Failed: [file]-%s%nReason: %s",file.getName,e.getMessage);
+          e.printStackTrace()
           System.exit(-1)
         }
       }
-
-      val view = RecordingFile.readAllEvents(file.toPath);
       for (event <- view.asScala) {
         event.getEventType.getLabel match {
           case "Allocation in new TLAB" => allocation(event, true)
