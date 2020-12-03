@@ -15,7 +15,9 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
   def verify(recordingFile: RecordingFile): Boolean = {
 
     val allEventsTypes = recordingFile.readEventTypes();
-    val eventTypes = allEventsTypes.stream().map(eventType => eventType.getLabel).collect(Collectors.toList[String])
+
+    val eventTypes = allEventsTypes.stream().map(eventType => eventType.getLabel).collect(Collectors.toSet[String])
+
     if(!eventTypes.contains("Allocation in new TLAB")){
       throw new JfrEventNotFoundException("'Allocation in new TLAB' Event not found")
     }
