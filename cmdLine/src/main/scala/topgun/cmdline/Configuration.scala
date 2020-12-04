@@ -35,7 +35,6 @@ class Configuration(cmdLine: JfrParseCommandLine) {
     case (_, _) => ???
   }
 
-
   val ignoredStack = if (cmdLine.ignoreContainingFrames eq null) Nil else {
     Files.readAllLines(cmdLine.ignoreContainingFrames.toPath).asScala.toList
   }
@@ -63,6 +62,4 @@ class Configuration(cmdLine: JfrParseCommandLine) {
     }
     include
   }
-
-
 }

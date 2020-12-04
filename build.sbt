@@ -11,7 +11,9 @@ lazy val cmdLine = (project in file("cmdLine")).
       scalaVersion := "2.13.1"
     )),
     name := "TopGun-cmdline",
-    libraryDependencies += "args4j" % "args4j" % "2.33"
+    libraryDependencies += "args4j" % "args4j" % "2.33",
+    libraryDependencies += "org.ow2.asm" % "asm" % "9.0",
+    libraryDependencies += "org.ow2.asm" % "asm-tree" % "9.0"
   ).dependsOn(core)
 
 lazy val core = (project in file("core")).

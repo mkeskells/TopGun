@@ -14,6 +14,7 @@ object JfrParse extends App {
   } catch {
     case e: CmdLineException =>
       // handling of wrong arguments
+
       System.err.println(e.getMessage)
       parser.printUsage(System.err)
   }
