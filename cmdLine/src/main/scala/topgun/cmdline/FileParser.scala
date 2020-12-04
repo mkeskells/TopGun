@@ -16,18 +16,7 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
 
   import configuration.{includeStack, includeThread}
 
-  def foundRequiredEvents(): Boolean = {
-    if(!allocationInNewTlab){
-      throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not found")
-    }
-    if(!allocationOutsideTlab){
-      throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not found")
-    }
-    if(!methodProfilingSample){
-      throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Method Profiling Sample' event not found")
-    }
-    return true;
-  }
+
 
   def parse(): Unit = {
 
@@ -53,6 +42,18 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
 
     } catch {
       case e: Exception => e.printStackTrace()
+    }
+
+    def foundRequiredEvents(): Unit = {
+      if(!allocationInNewTlab){
+        throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not found")
+      }
+      if(!allocationOutsideTlab){
+        throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not found")
+      }
+      if(!methodProfilingSample){
+        throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Method Profiling Sample' event not found")
+      }
     }
 
     try{
