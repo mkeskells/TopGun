@@ -10,10 +10,6 @@ import scala.jdk.CollectionConverters._
 
 class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, configuration: Configuration) {
 
-  var allocationInNewTlab: Boolean = false
-  var allocationOutsideTlab: Boolean = false
-  var methodProfilingSample: Boolean = false
-
   import configuration.{includeStack, includeThread}
 
 
@@ -21,9 +17,14 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
   def parse(): Unit = {
 
     println(s"*** File $file")
+    var allocationInNewTlab: Boolean = false
+    var allocationOutsideTlab: Boolean = false
+    var methodProfilingSample: Boolean = false
     try {
-      val view = RecordingFile.readAllEvents(file.toPath);
-      for (event <- view.asScala) {
+      val recordingFile = new RecordingFile(file.toPath)
+      //      for (event <- view.asScala) {
+      while (recordingFile.hasMoreEvents){
+        val event = recordingFile.readEvent()
         event.getEventType.getLabel match {
           case "Allocation in new TLAB" => allocationInNewTlab=true; allocation(event, true)
           case "Allocation outside TLAB" => allocationOutsideTlab=true; allocation(event, false)
