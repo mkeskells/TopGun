@@ -10,19 +10,20 @@ import scala.jdk.CollectionConverters._
 
 class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, configuration: Configuration) {
 
+  var allocationInNewTlab: Boolean = false
+  var allocationOutsideTlab: Boolean = false
+  var methodProfilingSample: Boolean = false
+
   import configuration.{includeStack, includeThread}
 
-  def verify(eventList: util.List[RecordedEvent]): Boolean = {
-
-    val eventTypes = eventList.stream().map(event => event.getEventType.getLabel).distinct().collect(Collectors.toSet[String])
-
-    if(!eventTypes.contains("Allocation in new TLAB")){
+  def foundRequiredEvents(): Boolean = {
+    if(!allocationInNewTlab){
       throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not found")
     }
-    if(!eventTypes.contains("Allocation outside TLAB")){
+    if(!allocationOutsideTlab){
       throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not found")
     }
-    if(!eventTypes.contains("Method Profiling Sample")){
+    if(!methodProfilingSample){
       throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Method Profiling Sample' event not found")
     }
     return true;
@@ -33,19 +34,11 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     println(s"*** File $file")
     try {
       val view = RecordingFile.readAllEvents(file.toPath);
-      try{
-        verify(view)
-      }catch{
-        case e: JfrEventNotFoundException => {
-          e.printStackTrace()
-          System.exit(-1)
-        }
-      }
       for (event <- view.asScala) {
         event.getEventType.getLabel match {
-          case "Allocation in new TLAB" => allocation(event, true)
-          case "Allocation outside TLAB" => allocation(event, false)
-          case "Method Profiling Sample" => cpu(event)
+          case "Allocation in new TLAB" => allocationInNewTlab=true; allocation(event, true)
+          case "Allocation outside TLAB" => allocationOutsideTlab=true; allocation(event, false)
+          case "Method Profiling Sample" => methodProfilingSample=true; cpu(event)
           case e =>
             totals.ignoreEvent(e)
 
@@ -57,8 +50,15 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
         }
         totals.totalEvents.incrementAndGet()
       }
+
     } catch {
       case e: Exception => e.printStackTrace()
+    }
+
+    try{
+      foundRequiredEvents()
+    }catch {
+      case e: JfrEventNotFoundException => e.printStackTrace(); System.exit(-1)
     }
   }
 
