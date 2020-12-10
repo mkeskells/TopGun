@@ -25,12 +25,12 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
       //      for (event <- view.asScala) {
       while (recordingFile.hasMoreEvents){
         val event = recordingFile.readEvent()
-        event.getEventType.getLabel match {
-          case "Allocation in new TLAB" => allocationInNewTlab=true; allocation(event, true)
-          case "Allocation outside TLAB" => allocationOutsideTlab=true; allocation(event, false)
-          case "Method Profiling Sample" => methodProfilingSample=true; cpu(event)
+        event.getEventType.getId match {
+          case 331 => allocationInNewTlab=true; allocation(event, true) // Allocation in New TLAB
+          case 332 => allocationOutsideTlab=true; allocation(event, false) // Allocation Outside TLAB
+          case 352 => methodProfilingSample=true; cpu(event) // Method Profiling Samle
           case e =>
-            totals.ignoreEvent(e)
+            totals.ignoreEvent(event.getEventType.getLabel)
 
           //            case "GC Configuration" =>
           //              println(event)
