@@ -24,7 +24,7 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     val files:List[File] = if (cmdLine.jfr.isDirectory)
       cmdLine.jfr.listFiles().toList.filter(f => f.isFile && f.getName.endsWith(".jfr"))
     else List(cmdLine.jfr)
-    
+
     files.foreach {file =>
       new FileParser(file, cmdLine, totals, configuration).parse()
     }
@@ -75,5 +75,4 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     System.out.println(s"Allocation - ignored (stack)  ${totals.ignoredStackAllocationEvents}  events")
     System.out.println(s"Allocation - ignored (thread) ${totals.ignoredThreadAllocationEvents}  events")
   }
-
 }
