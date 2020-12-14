@@ -27,6 +27,7 @@ object CallSite {
     all.getOrElseUpdate(site, site)
   }
 }
+
 class CallSite private(val packageName:String, val className: String, val methodName:String, val desc: String, val line:Int) extends CallSiteInfo {
 
   val FQN = s"$packageName.$className.$methodName$desc:$line"

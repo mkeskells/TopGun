@@ -13,7 +13,6 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
   import configuration.{includeStack, includeThread}
 
 
-
   def parse(): Unit = {
 
     println(s"*** File $file")
@@ -23,12 +22,12 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     try {
       val recordingFile = new RecordingFile(file.toPath)
       //      for (event <- view.asScala) {
-      while (recordingFile.hasMoreEvents){
+      while (recordingFile.hasMoreEvents) {
         val event = recordingFile.readEvent()
         event.getEventType.getLabel match {
-          case "Allocation in new TLAB" => allocationInNewTlab=true; allocation(event, true)
-          case "Allocation outside TLAB" => allocationOutsideTlab=true; allocation(event, false)
-          case "Method Profiling Sample" => methodProfilingSample=true; cpu(event)
+          case "Allocation in new TLAB" => allocationInNewTlab = true; allocation(event, true)
+          case "Allocation outside TLAB" => allocationOutsideTlab = true; allocation(event, false)
+          case "Method Profiling Sample" => methodProfilingSample = true; cpu(event)
           case e =>
             totals.ignoreEvent(e)
 
@@ -46,20 +45,20 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     }
 
     def foundRequiredEvents(): Unit = {
-      if(!allocationInNewTlab){
+      if (!allocationInNewTlab) {
         throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not found")
       }
-      if(!allocationOutsideTlab){
+      if (!allocationOutsideTlab) {
         throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not found")
       }
-      if(!methodProfilingSample){
+      if (!methodProfilingSample) {
         throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Method Profiling Sample' event not found")
       }
     }
 
-    try{
+    try {
       foundRequiredEvents()
-    }catch {
+    } catch {
       case e: JfrEventNotFoundException => e.printStackTrace(); System.exit(-1)
     }
   }
