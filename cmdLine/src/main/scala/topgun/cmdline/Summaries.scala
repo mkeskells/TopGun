@@ -41,6 +41,11 @@ class Totals {
   var ignoredThreadAllocationEvents= new AtomicLong
   var ignoredStackAllocationEvents= new AtomicLong
 
+  var totalEventsNative= new AtomicLong
+  var consumedCpuEventsNative= new AtomicLong
+  var ignoredThreadCpuEventsNative= new AtomicLong
+  var ignoredStackCpuEventsNative= new AtomicLong
+
 }
 class ClassTotals(val clazz: String) {
   var minDetected= new AtomicLong(Long.MaxValue)

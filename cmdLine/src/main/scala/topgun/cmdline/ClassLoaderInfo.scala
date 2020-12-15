@@ -28,5 +28,4 @@ class ClassLoaderInfo() {
     val interfaces:List[String] = reader.getInterfaces.toList
     ClassInfo(classNameFromReader, superClass, sourceFile, interfaces)
   }
-  // TODO: add method to generate CSV using class info.
 }

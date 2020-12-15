@@ -57,7 +57,12 @@ object FileWriter {
         ("allDeratedCpu", (site: CallSite) => site.allDeratedCpu.get),
         ("userDeratedCpu", (site: CallSite) => site.userDeratedCpu.get),
         ("allFirstCpu", (site: CallSite) => site.allFirstCpu.get),
-        ("userFirstCpu", (site: CallSite) => site.userFirstCpu.get)
+        ("userFirstCpu", (site: CallSite) => site.userFirstCpu.get),
+        ("nativeTransitiveCpu", (site: CallSite) => site.nativeTransitiveCpu.get),
+        ("nativeAllDeratedCpu", (site: CallSite) => site.nativeAllDeratedCpu.get),
+        ("nativeUserDeratedCpu", (site: CallSite) => site.nativeUserDeratedCpu.get),
+        ("nativeAllFirstCpu", (site: CallSite) => site.nativeAllFirstCpu.get),
+        ("nativeUserFirstCpu", (site: CallSite) => site.nativeUserFirstCpu.get)
       )
     }
     for ((heading, _) <- data) {

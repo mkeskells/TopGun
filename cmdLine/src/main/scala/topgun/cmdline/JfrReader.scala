@@ -5,10 +5,6 @@ import java.nio.file.Files
 
 import topgun.core.CallSite
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, Future}
-import scala.jdk.CollectionConverters._
-
 class JfrReader(cmdLine: JfrParseCommandLine) {
 
   val totals = new Totals
@@ -33,6 +29,7 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     println("writing files")
     FileWriter.writeFile(cmdLine.outDir, "allocations", callSitesList.filter(_.userDeratedAllocatedBytes.get > 0).sortBy(_.userDeratedAllocatedBytes.get))
     FileWriter.writeFile(cmdLine.outDir, "CPU", callSitesList.filter(_.userDeratedCpu.get > 0).sortBy(_.userDeratedCpu.get))
+    FileWriter.writeFile(cmdLine.outDir, "CPU_Native", callSitesList.filter(_.nativeUserDeratedCpu.get > 0).sortBy(_.nativeUserDeratedCpu.get))
     FileWriter.writeFile(cmdLine.outDir, "ALL", callSitesList.sortBy(_.FQN))
 
     FileWriter.writeAllocationSummary(cmdLine.outDir, "alloc-by-class", totals.allAllocations.toList.sortBy(_._2.totalExpandedAllocation.get))
@@ -64,15 +61,22 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     FileWriter.closeAllFiles
     System.out.println(s"Found                         ${totals.totalEvents} events")
     System.out.println(s"Ignored                       ${totals.ignoredEvents} events")
+
+    System.out.println(s"Found Native                  ${totals.totalEventsNative} events")
     totals.ignoredSummary.foreach {
       case (name, value) =>
         System.out.println(s"Ignored                       ${value} $name events")
     }
+    System.out.println(s"\nNon-Native")
     System.out.println(s"CPU        - consumed         ${totals.consumedCpuEvents}  events")
     System.out.println(s"CPU        - ignored (stack)  ${totals.ignoredStackCpuEvents}  events")
     System.out.println(s"CPU        - ignored (thread) ${totals.ignoredThreadCpuEvents}  events")
     System.out.println(s"Allocation - consumed         ${totals.consumedAllocationEvents}  events")
     System.out.println(s"Allocation - ignored (stack)  ${totals.ignoredStackAllocationEvents}  events")
     System.out.println(s"Allocation - ignored (thread) ${totals.ignoredThreadAllocationEvents}  events")
+    System.out.println(s"\nNative")
+    System.out.println(s"CPU        - consumed         ${totals.consumedCpuEventsNative}  events")
+    System.out.println(s"CPU        - ignored (stack)  ${totals.ignoredStackCpuEventsNative}  events")
+    System.out.println(s"CPU        - ignored (thread) ${totals.ignoredThreadCpuEventsNative}  events")
   }
 }
