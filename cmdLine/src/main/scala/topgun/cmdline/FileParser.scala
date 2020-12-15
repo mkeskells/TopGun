@@ -1,8 +1,9 @@
 package topgun.cmdline
 
 import java.io.File
-import java.util.stream.Collectors
+import java.net.URL
 import java.util
+
 import jdk.jfr.consumer.{RecordedClass, RecordedEvent, RecordedFrame, RecordingFile}
 import topgun.core.CallSite
 
@@ -12,73 +13,108 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
 
   import configuration.{includeStack, includeThread}
 
-
   def parse(): Unit = {
 
     println(s"*** File $file")
-    var allocationInNewTlab: Boolean = false
-    var allocationOutsideTlab: Boolean = false
-    var methodProfilingSample: Boolean = false
-    try {
-      val recordingFile = new RecordingFile(file.toPath)
-      //      for (event <- view.asScala) {
-      while (recordingFile.hasMoreEvents) {
-        val event = recordingFile.readEvent()
-        event.getEventType.getLabel match {
-          case "Allocation in new TLAB" => allocationInNewTlab = true; allocation(event, true)
-          case "Allocation outside TLAB" => allocationOutsideTlab = true; allocation(event, false)
-          case "Method Profiling Sample" => methodProfilingSample = true; cpu(event)
-          case e =>
-            totals.ignoreEvent(e)
+    var classPaths =  new util.ArrayList[URL]
 
-          //            case "GC Configuration" =>
-          //              println(event)
-          //            case "GC TLAB Configuration" =>
-          //              handleTlabConfiguration(event)
+    def preProcessing(): String = {
+
+      var FoundAllocationInNewTlabEnabled= false
+      var FoundAllocationOutsideTlabEnabled= false
+      var FoundMethodProfilingSampleEnabled= false
+      var isWindow:Option[Boolean] = None
+      var classPath = ""
+
+      def extractJfrSettings(event: RecordedEvent): Unit = {
+
+        val id:Long = event.getValue("id")
+        val name:String = event.getValue("name")
+        val value:String = event.getValue("value")
+
+        if( name.equals("enabled") ) {
+          id match {
+
+            case RecordedEventTypeIdMapping.AllocationInNewTLAB =>
+              if(value.toBoolean) FoundAllocationInNewTlabEnabled=true
+              else throw new InvalidJfrSettingException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not enabled")
+
+            case RecordedEventTypeIdMapping.AllocationOutsideTlab =>
+              if(value.toBoolean) FoundAllocationOutsideTlabEnabled=true
+              else throw new InvalidJfrSettingException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not enabled")
+
+            case RecordedEventTypeIdMapping.MethodProfilingSample =>
+              if(value.toBoolean) FoundMethodProfilingSampleEnabled=true
+              else throw new InvalidJfrSettingException(s"failed [file]${file.getName} Reason: 'Method Profiling Sample' event not enabled")
+
+            case _ =>
+          }
+        }
+      }
+
+      def notDoneFetchingInfo():Boolean = {
+        !FoundAllocationInNewTlabEnabled ||  !FoundAllocationOutsideTlabEnabled || !FoundMethodProfilingSampleEnabled ||
+          isWindow.isEmpty || classPath.isEmpty
+      }
+
+      val recordingFile = new RecordingFile(file.toPath)
+      while(recordingFile.hasMoreEvents && notDoneFetchingInfo()){
+        val event = recordingFile.readEvent()
+        event.getEventType.getId match {
+
+          case RecordedEventTypeIdMapping.InitialSystemProperty if classPath.isEmpty => if(event.getValue("key").toString.contains("java.class.path"))
+            classPath = event.getValue("value").toString
+
+          case RecordedEventTypeIdMapping.RecordingSetting => extractJfrSettings(event)
+
+          case RecordedEventTypeIdMapping.OSInformation if isWindow.isEmpty =>
+            isWindow = Some(event.getValue("osVersion").toString.toLowerCase.contains("win"))
+
           case _ =>
         }
-        totals.totalEvents.incrementAndGet()
       }
-
-    } catch {
-      case e: Exception => e.printStackTrace()
+      if(notDoneFetchingInfo()){
+        throw new Exception(s"Bad jfrfile [file] ${file}")
+      }
+      recordingFile.close()
+      ClassLoaderFactory.addIfDoesNotExist(classPath,if (isWindow.get) ";" else ":" )
+      classPath
     }
 
-    def foundRequiredEvents(): Unit = {
-      if (!allocationInNewTlab) {
-        throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not found")
-      }
-      if (!allocationOutsideTlab) {
-        throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not found")
-      }
-      if (!methodProfilingSample) {
-        throw new JfrEventNotFoundException(s"failed [file]${file.getName} Reason: 'Method Profiling Sample' event not found")
-      }
-    }
+    val classPath = preProcessing()
 
-    try {
-      foundRequiredEvents()
-    } catch {
-      case e: JfrEventNotFoundException => e.printStackTrace(); System.exit(-1)
+    val recordingFile = new RecordingFile(file.toPath)
+
+    while (recordingFile.hasMoreEvents){
+      val event = recordingFile.readEvent()
+      event.getEventType.getLabel match {
+        case "Allocation in new TLAB" => allocation(event, isTLAB = true, classPath)
+        case "Allocation outside TLAB" => allocation(event, isTLAB = false, classPath)
+        case "Method Profiling Sample" => cpu(event, classPath)
+        case "Method Profiling Sample Native" => cpuNative(event, classPath)
+        case e =>
+          totals.ignoreEvent(e)
+      }
+      totals.totalEvents.incrementAndGet()
     }
   }
 
   def addDerated(frames: Seq[CallSite], value: Long)
-                (fn: (CallSite, Double) => Unit) = {
+                (fn: (CallSite, Double) => Unit): Double = {
     val step = 1.0D / frames.size
     frames.foldLeft(1.0) {
-      case (remaining, (site)) =>
+      case (remaining, site) =>
         fn(site, remaining)
         remaining - step
     }
   }
 
-  def allocation(event: RecordedEvent, isTLAB: Boolean): Unit = {
+  def allocation(event: RecordedEvent, isTLAB: Boolean, classPath:String): Unit = {
     val thread = event.getThread
     if ((thread ne null) && !includeThread(thread.getJavaName)) {
       totals.ignoredThreadAllocationEvents.incrementAndGet()
     } else {
-      val distinctFrames: List[CallSite] = readFrames(event)
+      val distinctFrames: List[CallSite] = readFrames(event, classPath)
       if (!includeStack(distinctFrames)) {
         totals.ignoredStackAllocationEvents.incrementAndGet()
       } else {
@@ -120,12 +156,12 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     }
   }
 
-  def cpu(event: RecordedEvent): Unit = {
+  def cpu(event: RecordedEvent, classPath:String): Unit = {
     val thread = event.getThread
     if ((thread ne null) && !includeThread(thread.getJavaName)) {
       totals.ignoredThreadCpuEvents.incrementAndGet
     } else {
-      val distinctFrames: List[CallSite] = readFrames(event)
+      val distinctFrames: List[CallSite] = readFrames(event, classPath)
       if (!includeStack(distinctFrames)) {
         totals.ignoredStackCpuEvents.incrementAndGet
       } else {
@@ -151,14 +187,58 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     }
   }
 
-  private def readFrames(event: RecordedEvent): List[CallSite] = {
-    val stack = event.getStackTrace
+  def cpuNative(event: RecordedEvent, classPath:String): Unit = {
+    totals.totalEventsNative.incrementAndGet()
+    val thread = event.getThread
+    if ((thread ne null) && !includeThread(thread.getJavaName)) {
+      totals.ignoredThreadCpuEventsNative.incrementAndGet
 
+    } else {
+      val distinctFrames: List[CallSite] = readFrames(event, classPath)
+      if (!includeStack(distinctFrames)) {
+        totals.ignoredStackCpuEventsNative.incrementAndGet
+      } else {
+        totals.consumedCpuEventsNative.incrementAndGet
+        val distinctUserFrames: List[CallSite] = distinctFrames.filter(_.isUserFrame)
+
+        addDerated(distinctFrames, 1) {
+          (site: CallSite, value: Double) =>
+            site.nativeAllDeratedCpu.add(value)
+        }
+        addDerated(distinctUserFrames, 1) {
+          (site: CallSite, value: Double) =>
+            site.nativeUserDeratedCpu.add(value)
+        }
+
+        distinctFrames.headOption.foreach(_.nativeAllFirstCpu.incrementAndGet)
+        distinctUserFrames.headOption.foreach(_.nativeUserFirstCpu.incrementAndGet)
+
+        distinctFrames.foreach {
+          _.nativeTransitiveCpu.incrementAndGet
+        }
+      }
+    }
+  }
+
+  private def readFrames(event: RecordedEvent, classPath:String): List[CallSite] = {
+    val stack = event.getStackTrace
     if (stack eq null) List() else {
       stack.getFrames.iterator.asScala.map {
         frame: RecordedFrame =>
           val method = frame.getMethod
-          CallSite(method.getType.getName, method.getName, method.getName, method.getDescriptor, frame.getLineNumber)
+          if(method ne null) {
+            val splitIndex = method.getType.getName.lastIndexOf(".")
+            CallSite(
+              method.getType.getName.substring(0,splitIndex).intern(),
+              method.getType.getName.substring(splitIndex+1).intern(),
+              method.getName.intern(),
+              method.getDescriptor.intern(),
+              frame.getLineNumber,
+              classPath.intern()
+            )
+          } else {
+            CallSite("NoMethodInFrame_", "NoMethodInFrame_", "NoMethodInFrame_", "NoMethodInFrame_", frame.getLineNumber,classPath.intern())
+          }
       }.distinct.takeWhile { f => !f.isIgnorableTopFrame }.toList
     }
   }

@@ -1,7 +1,7 @@
 package topgun.core
 
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.{AtomicLong}
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable
 import scala.util.hashing.MurmurHash3
@@ -22,13 +22,12 @@ object CallSite {
   private val IGNORABLE_TOP_FRAME = 2
 
   private val all = new mutable.HashMap[CallSite, CallSite]()
-  def apply(packageName: String, className: String, methodName: String, desc: String, line: Int): CallSite = {
-    val site = new CallSite(packageName.intern, className.intern, methodName.intern, desc.intern, line)
+  def apply(packageName: String, className: String, methodName: String, desc: String, line: Int, classPaths: String): CallSite = {
+    val site = new CallSite(packageName, className, methodName,  desc, line, classPaths)
     all.getOrElseUpdate(site, site)
   }
 }
-
-class CallSite private(val packageName:String, val className: String, val methodName:String, val desc: String, val line:Int) extends CallSiteInfo {
+class CallSite private(val packageName:String, val className: String, val methodName:String, val desc: String, val line:Int, val classPaths: String) extends CallSiteInfo {
 
   val FQN = s"$packageName.$className.$methodName$desc:$line"
   override def toString = FQN
@@ -80,10 +79,19 @@ trait CpuCounts {
   val transitiveCpu = new AtomicLong
 
   val allDeratedCpu = new AtomicDouble
-  val userDeratedCpu = new AtomicDouble
+  val userDeratedCpu = new AtomicDouble //todo
 
   val allFirstCpu = new AtomicLong
   val userFirstCpu = new AtomicLong
+
+//  NATIVE
+  val nativeTransitiveCpu = new AtomicLong
+
+  val nativeAllDeratedCpu = new AtomicDouble
+  val nativeUserDeratedCpu = new AtomicDouble
+
+  val nativeAllFirstCpu = new AtomicLong
+  val nativeUserFirstCpu = new AtomicLong
 }
 class ClassAllocations extends AllocationCounts
 trait CallSiteInfo extends AllocationCounts with CpuCounts{
