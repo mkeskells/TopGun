@@ -5,7 +5,7 @@ import java.net.URL
 import java.util
 
 import jdk.jfr.consumer.{RecordedClass, RecordedEvent, RecordedFrame, RecordingFile}
-import topgun.core.CallSite
+import topgun.core.{AtomicDouble, CallSite}
 
 import scala.jdk.CollectionConverters._
 
@@ -39,7 +39,7 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
               if (value.toBoolean) FoundAllocationInNewTlabEnabled = true
               else throw new InvalidJfrSettingException(s"failed [file]${file.getName} Reason: 'Allocation in new TLAB' event not enabled")
 
-            case EventTypeIdMapping.AllocationOutsideTlab =>
+            case EventTypeIdMapping.AllocationOutsideTLAB =>
               if (value.toBoolean) FoundAllocationOutsideTlabEnabled = true
               else throw new InvalidJfrSettingException(s"failed [file]${file.getName} Reason: 'Allocation outside TLAB' event not enabled")
 
@@ -89,7 +89,7 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
       val event = recordingFile.readEvent()
       event.getEventType.getName match {
         case EventTypeNameMapping.AllocationInNewTLAB => allocation(event, isTLAB = true, classPath)
-        case EventTypeNameMapping.AllocationOutsideTlab => allocation(event, isTLAB = false, classPath)
+        case EventTypeNameMapping.AllocationOutsideTLAB => allocation(event, isTLAB = false, classPath)
         case EventTypeNameMapping.MethodProfilingSample => cpu(event, classPath)
         case EventTypeNameMapping.MethodProfilingSampleNative => cpuNative(event, classPath)
         case e =>
@@ -99,14 +99,72 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     }
   }
 
-  def addDerated(frames: Seq[CallSite], value: Long)
-                (fn: (CallSite, Double) => Unit): Double = {
+  def addDerated(frames: Seq[CallSite], isUserFrame: Boolean, value: Long)
+                (fn: (CallSite, Boolean, Double) => Unit): Double = {
     val step = 1.0D / frames.size
     frames.foldLeft(1.0) {
       case (remaining, site) =>
-        fn(site, remaining)
+        fn(site, isUserFrame, remaining)
         remaining - step
     }
+  }
+
+
+  def processFrames(frames: List[CallSite], allocatedBytes: Long, clazz: String, isNative: Option[Boolean]): Unit = {
+
+    val addDeratedImpl = (site: CallSite, isUserFrame: Boolean, value: Double) => {
+      if (isNative.isEmpty) {
+        if (isUserFrame) {
+          site.userDeratedAllocatedBytes.add(value);
+          site.classAllocations(clazz).userDeratedAllocatedBytes.add(value)
+        } else {
+          site.allDeratedAllocatedBytes.add(value);
+          site.classAllocations(clazz).allDeratedAllocatedBytes.add(value)
+        }
+      } else {
+        if (isNative.get) {
+          if (isUserFrame) site.nativeUserDeratedCpu.add(value) else site.nativeAllDeratedCpu.add(value)
+        } else {
+          if (isUserFrame) site.userDeratedCpu.add(value); else site.allDeratedCpu.add(value)
+        }
+      }
+    }
+
+    addDerated(frames, isUserFrame = false, allocatedBytes) {
+      addDeratedImpl
+    }
+    val distinctUserFrames: List[CallSite] = frames.filter(_.isUserFrame)
+    addDerated(distinctUserFrames, isUserFrame = true, allocatedBytes) {
+      addDeratedImpl
+    }
+    if (isNative.isEmpty) {
+      frames.headOption.foreach(_.allLocalAllocatedBytes.addAndGet(allocatedBytes))
+      distinctUserFrames.headOption.foreach(_.userLocalAllocatedBytes.addAndGet(allocatedBytes))
+      frames.foreach { usage =>
+        usage.transitiveAllocatedBytes.addAndGet(allocatedBytes)
+        usage.classAllocations(clazz).transitiveAllocatedBytes.addAndGet(allocatedBytes)
+      }
+    } else {
+      if (isNative.get) {
+        frames.headOption.foreach(_.nativeAllFirstCpu.incrementAndGet)
+        distinctUserFrames.headOption.foreach(_.nativeUserFirstCpu.incrementAndGet)
+        frames.foreach {
+          _.nativeTransitiveCpu.incrementAndGet
+        }
+      } else {
+        frames.headOption.foreach(_.allFirstCpu.incrementAndGet)
+        distinctUserFrames.headOption.foreach(_.userFirstCpu.incrementAndGet)
+        frames.foreach {
+          _.transitiveCpu.incrementAndGet
+        }
+      }
+    }
+  }
+
+  def aggregate(distinctFramesDPCMLV: List[CallSite], allocatedBytes: Long, clazz: String, isNative: Option[Boolean]): Unit = {
+    AggregateView.values().foreach(view => {
+      processFrames(distinctFramesDPCMLV.map(view.convertToView), allocatedBytes, clazz, isNative)
+    })
   }
 
   def allocation(event: RecordedEvent, isTLAB: Boolean, classPath: String): Unit = {
@@ -114,44 +172,22 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     if ((thread ne null) && !includeThread(thread.getJavaName)) {
       totals.ignoredThreadAllocationEvents.incrementAndGet()
     } else {
-      val distinctFrames: List[CallSite] = readFrames(event, classPath)
-      if (!includeStack(distinctFrames)) {
+      val distinctFramesDPCMLV: List[CallSite] = readFrames(event, classPath, AggregateView.PACKAGE_CLASSNAME_METHOD_LINE_VIEW)
+      if (!includeStack(distinctFramesDPCMLV)) {
         totals.ignoredStackAllocationEvents.incrementAndGet()
       } else {
         totals.consumedAllocationEvents.incrementAndGet()
-        val distinctUserFrames: List[CallSite] = distinctFrames.filter(_.isUserFrame)
+
         val cls = event.getValue("objectClass").asInstanceOf[RecordedClass]
         val clazz = cls.getName
         val detectedAllocation = event.getValue("allocationSize").asInstanceOf[Long]
 
         val allocatedBytes = if (isTLAB) {
-          //we will only see an allocation of size n for
-          //tlabSize/n of the allocations
-          //so we record that as  tlabSize/n*n = tlabSize
-
           event.getValue("tlabSize").asInstanceOf[Long]
         } else detectedAllocation
 
         totals.recordClassAllocation(clazz, allocatedBytes, detectedAllocation)
-
-        addDerated(distinctFrames, allocatedBytes) {
-          (site: CallSite, value: Double) =>
-            site.allDeratedAllocatedBytes.add(value)
-            site.classAllocations(clazz).allDeratedAllocatedBytes.add(value)
-        }
-        addDerated(distinctUserFrames, allocatedBytes) {
-          (site: CallSite, value: Double) =>
-            site.userDeratedAllocatedBytes.add(value)
-            site.classAllocations(clazz).userDeratedAllocatedBytes.add(value)
-        }
-
-        distinctFrames.headOption.foreach(_.allLocalAllocatedBytes.addAndGet(allocatedBytes))
-        distinctUserFrames.headOption.foreach(_.userLocalAllocatedBytes.addAndGet(allocatedBytes))
-
-        distinctFrames.foreach { usage =>
-          usage.transitiveAllocatedBytes.addAndGet(allocatedBytes)
-          usage.classAllocations(clazz).transitiveAllocatedBytes.addAndGet(allocatedBytes)
-        }
+        aggregate(distinctFramesDPCMLV, allocatedBytes, clazz, None)
       }
     }
   }
@@ -161,28 +197,12 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     if ((thread ne null) && !includeThread(thread.getJavaName)) {
       totals.ignoredThreadCpuEvents.incrementAndGet
     } else {
-      val distinctFrames: List[CallSite] = readFrames(event, classPath)
-      if (!includeStack(distinctFrames)) {
+      val distinctFramesDPCMLV: List[CallSite] = readFrames(event, classPath, AggregateView.PACKAGE_CLASSNAME_METHOD_LINE_VIEW)
+      if (!includeStack(distinctFramesDPCMLV)) {
         totals.ignoredStackCpuEvents.incrementAndGet
       } else {
         totals.consumedCpuEvents.incrementAndGet
-        val distinctUserFrames: List[CallSite] = distinctFrames.filter(_.isUserFrame)
-
-        addDerated(distinctFrames, 1) {
-          (site: CallSite, value: Double) =>
-            site.allDeratedCpu.add(value)
-        }
-        addDerated(distinctUserFrames, 1) {
-          (site: CallSite, value: Double) =>
-            site.userDeratedCpu.add(value)
-        }
-
-        distinctFrames.headOption.foreach(_.allFirstCpu.incrementAndGet)
-        distinctUserFrames.headOption.foreach(_.userFirstCpu.incrementAndGet)
-
-        distinctFrames.foreach {
-          _.transitiveCpu.incrementAndGet
-        }
+        aggregate(distinctFramesDPCMLV, 1, "", Some(false))
       }
     }
   }
@@ -193,33 +213,17 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
     if ((thread ne null) && !includeThread(thread.getJavaName)) {
       totals.ignoredThreadCpuEventsNative.incrementAndGet
     } else {
-      val distinctFrames: List[CallSite] = readFrames(event, classPath)
-      if (!includeStack(distinctFrames)) {
+      val distinctFramesDPCMLV: List[CallSite] = readFrames(event, classPath, AggregateView.PACKAGE_CLASSNAME_METHOD_LINE_VIEW)
+      if (!includeStack(distinctFramesDPCMLV)) {
         totals.ignoredStackCpuEventsNative.incrementAndGet
       } else {
         totals.consumedCpuEventsNative.incrementAndGet
-        val distinctUserFrames: List[CallSite] = distinctFrames.filter(_.isUserFrame)
-
-        addDerated(distinctFrames, 1) {
-          (site: CallSite, value: Double) =>
-            site.nativeAllDeratedCpu.add(value)
-        }
-        addDerated(distinctUserFrames, 1) {
-          (site: CallSite, value: Double) =>
-            site.nativeUserDeratedCpu.add(value)
-        }
-
-        distinctFrames.headOption.foreach(_.nativeAllFirstCpu.incrementAndGet)
-        distinctUserFrames.headOption.foreach(_.nativeUserFirstCpu.incrementAndGet)
-
-        distinctFrames.foreach {
-          _.nativeTransitiveCpu.incrementAndGet
-        }
+        aggregate(distinctFramesDPCMLV, 1, "", Some(true))
       }
     }
   }
 
-  private def readFrames(event: RecordedEvent, classPath: String): List[CallSite] = {
+  private def readFrames(event: RecordedEvent, classPath: String, view: AggregateView): List[CallSite] = {
     val stack = event.getStackTrace
     if (stack eq null) List() else {
       stack.getFrames.iterator.asScala.map {
@@ -229,7 +233,9 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
             val splitIndex = method.getType.getName.lastIndexOf(".")
             val packageName = if (splitIndex != -1) method.getType.getName.substring(0, splitIndex).intern() else ""
             val className = if (splitIndex != -1) method.getType.getName.substring(splitIndex + 1).intern() else method.getType.getName.intern()
-
+            val resourceName = if (packageName.isEmpty) className else s"${packageName}.${className}"
+            val fileName = ClassLoaderFactory.classLoaderInfo.lookup(resourceName, ClassLoaderFactory.getClassLoader(classPath)).sourceFile
+            val methodName = method.getName.intern()
             /* The synthetic lambda apply method will call the lambda implementation method with the actual code; that method has line number info.
             so we should be able to just ignore these "$$Lambda" class frames.
             map all lambda frames to null and filter out after map*/
@@ -239,14 +245,15 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
               CallSite(
                 packageName,
                 className,
-                method.getName.intern(),
+                methodName,
                 method.getDescriptor.intern(),
                 frame.getLineNumber,
-                classPath.intern()
+                view,
+                fileName
               )
             }
           } else {
-            CallSite("NoMethodInFrame_", "NoMethodInFrame_", "NoMethodInFrame_", "NoMethodInFrame_", frame.getLineNumber, classPath.intern())
+            CallSite("NoMethodInFrame_", "NoMethodInFrame_", "NoMethodInFrame_", "NoMethodInFrame_", frame.getLineNumber, view, "NoMethodInFrame_")
           }
       }.filter(_ ne null) // $Lambda frames are mapped to null and filtered out.
         .distinct.takeWhile {

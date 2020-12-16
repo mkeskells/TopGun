@@ -7,7 +7,7 @@ import scala.collection.mutable
 
 object ClassLoaderFactory {
   private val classLoaderHashMap = mutable.HashMap.empty[String, ClassLoader]
-
+  val classLoaderInfo = new ClassLoaderInfo
   def getClassLoader(classPath: String): ClassLoader = {
     classLoaderHashMap(classPath)
   }
