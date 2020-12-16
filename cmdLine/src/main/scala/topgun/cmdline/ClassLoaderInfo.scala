@@ -15,21 +15,21 @@ class ClassLoaderInfo() {
     allClasses.getOrElseUpdate(className, buildClassInfo(className, classLoader)): ClassInfo
   }
 
-  def buildClassInfo(className: String, classLoader: ClassLoader): ClassInfo = {
+  private def buildClassInfo(className: String, classLoader: ClassLoader): ClassInfo = {
     val resourceName = className.replace(".", "/") + ".class"
     val iStream = classLoader.getResourceAsStream(resourceName)
-    if(iStream == null) {
-      return ClassInfo(className,"super not found","sourceFile not found",List())
+    if (iStream == null) {
+      return ClassInfo(className, "super not found", "sourceFile not found", List())
     }
     val reader = new ClassReader(iStream)
     val classNode = new ClassNode()
-    // specify no parsing options.
+    // specify no parsing options
     reader.accept(classNode, 0)
     iStream.close()
     val classNameFromReader = reader.getClassName
     val sourceFile = classNode.sourceFile
     val superClass = reader.getSuperName
-    val interfaces:List[String] = reader.getInterfaces.toList
+    val interfaces: List[String] = reader.getInterfaces.toList
     ClassInfo(classNameFromReader, superClass, sourceFile, interfaces)
   }
 }

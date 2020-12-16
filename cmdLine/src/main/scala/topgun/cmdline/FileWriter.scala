@@ -2,11 +2,30 @@ package topgun.cmdline
 
 import java.io._
 
-import topgun.core.{CallSite, CallSiteInfo, ClassAllocations}
+import topgun.core.{CallSite, ClassAllocations}
 
 import scala.collection.mutable
 
 object FileWriter {
+  val classAllocationFields: List[(String, (CallSite, String, ClassAllocations) => Any)] = {
+    List(
+      ("packageName", (site: CallSite, className: String, allocations: ClassAllocations) => site.packageName),
+      ("sourceFile", (site: CallSite, className: String, allocations: ClassAllocations) => site.fileName),
+      ("className", (site: CallSite, className: String, allocations: ClassAllocations) => site.className),
+      ("methodName", (site: CallSite, className: String, allocations: ClassAllocations) => site.methodName),
+      ("desc", (site: CallSite, className: String, allocations: ClassAllocations) => site.desc),
+      ("line", (site: CallSite, className: String, allocations: ClassAllocations) => site.line),
+      ("toStackTrace", (site: CallSite, className: String, allocations: ClassAllocations) => site.toStackTrace),
+      ("allocated", (site: CallSite, className: String, allocations: ClassAllocations) => className),
+      ("class_transitiveAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.transitiveAllocatedBytes.get),
+      ("class_allDeratedAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.allDeratedAllocatedBytes.get),
+      ("class_userDeratedAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.userDeratedAllocatedBytes.get),
+      ("class_allLocalAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.allLocalAllocatedBytes.get),
+      ("class_userLocalAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.userLocalAllocatedBytes.get)
+    )
+  }
+  val files = mutable.Map[String, BufferedWriter]()
+
   def writeAllocationSummary(directory: File, fileName: String, lines: List[(String, ClassTotals)]): Unit = {
     val file = new File(directory, s"$fileName.csv")
     val w = new BufferedWriter(new FileWriter(file))
@@ -43,6 +62,7 @@ object FileWriter {
     val data: List[(String, (CallSite => Any))] = {
       List(
         ("packageName", (site: CallSite) => site.packageName),
+        ("sourceFile", (site: CallSite) => site.fileName),
         ("className", (site: CallSite) => site.className),
         ("methodName", (site: CallSite) => site.methodName),
         ("desc", (site: CallSite) => site.desc),
@@ -79,24 +99,6 @@ object FileWriter {
     w.flush()
     w.close()
   }
-
-  val classAllocationFields: List[(String, (CallSite, String, ClassAllocations) => Any)] = {
-    List(
-      ("packageName", (site: CallSite, className: String, allocations: ClassAllocations) => site.packageName),
-      ("className", (site: CallSite, className: String, allocations: ClassAllocations) => site.className),
-      ("methodName", (site: CallSite, className: String, allocations: ClassAllocations) => site.methodName),
-      ("desc", (site: CallSite, className: String, allocations: ClassAllocations) => site.desc),
-      ("line", (site: CallSite, className: String, allocations: ClassAllocations) => site.line),
-      ("toStackTrace", (site: CallSite, className: String, allocations: ClassAllocations) => site.toStackTrace),
-      ("allocated", (site: CallSite, className: String, allocations: ClassAllocations) => className),
-      ("class_transitiveAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.transitiveAllocatedBytes.get),
-      ("class_allDeratedAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.allDeratedAllocatedBytes.get),
-      ("class_userDeratedAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.userDeratedAllocatedBytes.get),
-      ("class_allLocalAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.allLocalAllocatedBytes.get),
-      ("class_userLocalAllocatedBytes", (site: CallSite, className: String, allocations: ClassAllocations) => allocations.userLocalAllocatedBytes.get)
-    )
-  }
-  val files = mutable.Map[String, BufferedWriter]()
 
   def appendFile(directory: File, fileName: String, site: CallSite, className: String, allocation: ClassAllocations): Unit = {
     val w: BufferedWriter = files.getOrElseUpdate(fileName, {

@@ -27,36 +27,41 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
 
     val callSitesList: List[CallSite] = CallSite.allSites.toList
     println("writing files")
-    FileWriter.writeFile(cmdLine.outDir, "allocations", callSitesList.filter(_.userDeratedAllocatedBytes.get > 0).sortBy(_.userDeratedAllocatedBytes.get))
-    FileWriter.writeFile(cmdLine.outDir, "CPU", callSitesList.filter(_.userDeratedCpu.get > 0).sortBy(_.userDeratedCpu.get))
-    FileWriter.writeFile(cmdLine.outDir, "CPU_Native", callSitesList.filter(_.nativeUserDeratedCpu.get > 0).sortBy(_.nativeUserDeratedCpu.get))
-    FileWriter.writeFile(cmdLine.outDir, "ALL", callSitesList.sortBy(_.FQN))
+    def writeAggregationOfView(view: AggregateView): Unit = {
+      val viewName = view.name().toLowerCase.replace("_","-")
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-allocations", callSitesList.filter(_.view.equals(view)).filter(_.userDeratedAllocatedBytes.get > 0).sortBy(_.userDeratedAllocatedBytes.get))
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-CPU", callSitesList.filter(_.view.equals(view)).filter(_.userDeratedCpu.get > 0).sortBy(_.userDeratedCpu.get))
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-CPU_Native", callSitesList.filter(_.view.equals(view)).filter(_.nativeUserDeratedCpu.get > 0).sortBy(_.nativeUserDeratedCpu.get))
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-ALL", callSitesList.filter(_.view.equals(view)).sortBy(_.FQN))
+
+      println("writing class allocation files")
+      var classRecord = 0D
+      val inc = 100.0D / callSitesList.size
+      var classReported = 10
+      for (site <- callSitesList.sortBy(_.FQN)) {
+        classRecord += inc
+        if (classRecord > classReported) {
+          println(s"$classReported %")
+          classReported += 10
+        }
+        for ((className, allocation) <- site.classesAndAllocation
+             if (totals.allocatedBytes(className) > cmdLine.minAllocationByClass);
+             if (allocation.transitiveAllocatedBytes.get > 0)) {
+          FileWriter.appendFile(cmdLine.outDir, s"${viewName}-allocation-$className", site, className, allocation)
+        }
+      }
+      println()
+      callSitesList.sortBy(-_.userDeratedAllocatedBytes.get).take(100) foreach {
+        site => println(s"Allocation - count ${site.userDeratedAllocatedBytes.get} site ${site.toStackTrace}")
+      }
+      callSitesList.sortBy(-_.userDeratedCpu.get).take(100) foreach {
+        site => println(s"CPU - count ${site.userDeratedCpu.get} site ${site.toStackTrace}")
+      }
+    }
 
     FileWriter.writeAllocationSummary(cmdLine.outDir, "alloc-by-class", totals.allAllocations.toList.sortBy(_._2.totalExpandedAllocation.get))
+    AggregateView.values().foreach(frames => {  writeAggregationOfView(frames) })
 
-    println("writing class allocation files")
-    var classRecord = 0D
-    val inc = 100.0D / callSitesList.size
-    var classReported = 10
-    for (site <- callSitesList.sortBy(_.FQN)) {
-      classRecord += inc
-      if (classRecord > classReported) {
-        println(s"$classReported %")
-        classReported += 10
-      }
-      for ((className, allocation) <- site.classesAndAllocation
-           if (totals.allocatedBytes(className) > cmdLine.minAllocationByClass);
-           if (allocation.transitiveAllocatedBytes.get > 0)) {
-        FileWriter.appendFile(cmdLine.outDir, s"allocation-$className", site, className, allocation)
-      }
-    }
-    println()
-    callSitesList.sortBy(-_.userDeratedAllocatedBytes.get).take(100) foreach {
-      site => println(s"Allocation - count ${site.userDeratedAllocatedBytes.get} site ${site.toStackTrace}")
-    }
-    callSitesList.sortBy(-_.userDeratedCpu.get).take(100) foreach {
-      site => println(s"CPU - count ${site.userDeratedCpu.get} site ${site.toStackTrace}")
-    }
     println("finishing")
     FileWriter.closeAllFiles
     System.out.println(s"Found                         ${totals.totalEvents} events")
