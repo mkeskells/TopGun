@@ -1,6 +1,8 @@
 package topgun.cmdline
 
 
+import java.io.IOException
+
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.tree.ClassNode
 
@@ -16,11 +18,13 @@ class ClassLoaderInfo() {
   def buildClassInfo(className: String, classLoader: ClassLoader): ClassInfo = {
     val resourceName = className.replace(".", "/") + ".class"
     val iStream = classLoader.getResourceAsStream(resourceName)
+    if(iStream == null) {
+      return ClassInfo(className,"super not found","sourceFile not found",List())
+    }
     val reader = new ClassReader(iStream)
     val classNode = new ClassNode()
     // specify no parsing options.
-    val parsingFlagNone = 0;
-    reader.accept(classNode, parsingFlagNone)
+    reader.accept(classNode, 0)
     iStream.close()
     val classNameFromReader = reader.getClassName
     val sourceFile = classNode.sourceFile

@@ -3,12 +3,15 @@ package topgun.core
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
+import topgun.cmdline.{ClassLoaderFactory, ClassLoaderInfo}
+
 import scala.collection.mutable
 import scala.util.hashing.MurmurHash3
 
 object CallSite {
   def allSites = all.keysIterator
 
+  val classLoaderInfo = new ClassLoaderInfo
   var userFrame: CallSite => Boolean = _
   var ignorableTopFrame: CallSite => Boolean = _
   def configureFlags(site: CallSite): Int = {
@@ -37,10 +40,10 @@ class CallSite private(val packageName:String, val className: String, val method
   def isIgnorableTopFrame = (flags & CallSite.IGNORABLE_TOP_FRAME) != 0
 
   lazy val filename = {
-    val i = className.indexOf('$')
-    if (i == -1) className else className.substring(0, i)
+    val resourceName = if(packageName.isEmpty) className else s"${packageName}.${className}"
+    CallSite.classLoaderInfo.lookup(resourceName, ClassLoaderFactory.getClassLoader(classPaths)).sourceFile
   }
-  def toStackTrace: String = s"at $packageName.$className.$methodName(maybe $filename.scala:$line)"
+  def toStackTrace: String = s"at $packageName.$className.$methodName($filename:$line)"
 
   def canEqual(other: Any): Boolean = other.isInstanceOf[CallSite]
 
