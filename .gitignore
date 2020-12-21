@@ -6,3 +6,4 @@
 /null/
 /project/project/target/
 /.sbt/repositories
+/.bsp/
