@@ -1,8 +1,10 @@
 package topgun.cmdline
 
-import java.io.File
+import java.io.{File, FileInputStream, FileOutputStream, IOException, InputStream, OutputStream}
 import java.net.URL
+import java.nio.file.Files
 import java.util
+import java.util.{ArrayList}
 
 import jdk.jfr.consumer.{RecordedClass, RecordedEvent, RecordedFrame, RecordingFile}
 import topgun.core.{AtomicDouble, CallSite}
@@ -16,9 +18,8 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
   def parse(): Unit = {
 
     println(s"*** File $file")
-    var classPaths = new util.ArrayList[URL]
 
-    def preProcessing(): String = {
+    def preProcessing(tmpFile: File): String = {
 
       var FoundAllocationInNewTlabEnabled = false
       var FoundAllocationOutsideTlabEnabled = false
@@ -57,7 +58,7 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
           isWindow.isEmpty || classPath.isEmpty
       }
 
-      val recordingFile = new RecordingFile(file.toPath)
+      val recordingFile = new RecordingFile(tmpFile.toPath)
       while (recordingFile.hasMoreEvents && notDoneFetchingInfo()) {
         val event = recordingFile.readEvent()
         event.getEventType.getName match {
@@ -81,22 +82,55 @@ class FileParser(file: File, cmdLine: JfrParseCommandLine, totals: Totals, confi
       classPath
     }
 
-    val classPath = preProcessing()
-
-    val recordingFile = new RecordingFile(file.toPath)
-
-    while (recordingFile.hasMoreEvents) {
-      val event = recordingFile.readEvent()
-      event.getEventType.getName match {
-        case EventTypeNameMapping.AllocationInNewTLAB => allocation(event, isTLAB = true, classPath)
-        case EventTypeNameMapping.AllocationOutsideTLAB => allocation(event, isTLAB = false, classPath)
-        case EventTypeNameMapping.MethodProfilingSample => cpu(event, classPath)
-        case EventTypeNameMapping.MethodProfilingSampleNative => cpuNative(event, classPath)
-        case e =>
-          totals.ignoreEvent(e)
+    def getJfrChunks: util.List[File] = {
+      // Jfr file header - First 13 bytes of any jfr file
+      val jfrChunkHeader = Array[Byte](0x46, 0x4C, 0x52, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+      var inputStream = new FileInputStream(file)
+      val streamSearcher = new StreamSearcher(jfrChunkHeader)
+      val tmpdir = Files.createTempDirectory("topgun").toFile.getAbsolutePath
+      val chuckIndexes = new util.ArrayList[Long]
+      var len = 0L
+      while ( {
+        (len = streamSearcher.search(inputStream));
+        len != -1
+      }) chuckIndexes.add(len)
+      chuckIndexes.add(len)
+      inputStream.close()
+      inputStream = new FileInputStream(file)
+      val chunks = new util.ArrayList[File]
+      for (index <- 1 until chuckIndexes.size) {
+        val chunkFile = new File(s"$tmpdir/jfr_$index.jfr")
+        chunks.add(chunkFile)
+        val outputStream = new FileOutputStream(chunkFile)
+        val chunkSize = chuckIndexes.get(index).toInt
+        if (chuckIndexes.get(index) == -1) {
+          outputStream.write(inputStream.readAllBytes)
+          return chunks
+        }
+        val buffer = new Array[Byte](chunkSize)
+        if (inputStream.read(buffer, 0, chunkSize) != chunkSize) throw new IOException(s"Read failed: [file] $file")
+        outputStream.write(buffer)
       }
-      totals.totalEvents.incrementAndGet()
+      chunks
     }
+
+    getJfrChunks.forEach(chunkFile => {
+      val classPath = preProcessing(chunkFile)
+      val recordingFile = new RecordingFile(chunkFile.toPath)
+
+      while (recordingFile.hasMoreEvents) {
+        val event = recordingFile.readEvent()
+        event.getEventType.getName match {
+          case EventTypeNameMapping.AllocationInNewTLAB => allocation(event, isTLAB = true, classPath)
+          case EventTypeNameMapping.AllocationOutsideTLAB => allocation(event, isTLAB = false, classPath)
+          case EventTypeNameMapping.MethodProfilingSample => cpu(event, classPath)
+          case EventTypeNameMapping.MethodProfilingSampleNative => cpuNative(event, classPath)
+          case e =>
+            totals.ignoreEvent(e)
+        }
+        totals.totalEvents.incrementAndGet()
+      }
+    })
   }
 
   def addDerated(frames: Seq[CallSite], isUserFrame: Boolean, value: Long)
