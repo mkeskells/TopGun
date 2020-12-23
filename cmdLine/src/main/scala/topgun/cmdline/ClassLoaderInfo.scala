@@ -1,15 +1,13 @@
 package topgun.cmdline
 
-
-import java.io.IOException
-
 import org.objectweb.asm.ClassReader
-import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree.{ClassNode, LineNumberNode}
 
 import scala.collection.mutable
 
 class ClassLoaderInfo() {
-  var allClasses = new mutable.HashMap[String, ClassInfo]()
+  val classMethodProfiles = new mutable.HashMap[String, ClassSchema]()
+  val allClasses = new mutable.HashMap[String, ClassInfo]()
 
   def lookup(className: String, classLoader: ClassLoader): ClassInfo = {
     allClasses.getOrElseUpdate(className, buildClassInfo(className, classLoader)): ClassInfo
@@ -26,6 +24,19 @@ class ClassLoaderInfo() {
     // specify no parsing options
     reader.accept(classNode, 0)
     iStream.close()
+
+    def profileClass(): Unit = {
+      val classSchema = new ClassSchema();
+      classNode.methods.stream().filter(!_.name.equals("<init>")).filter(!_.name.equals("<clinit>"))
+        .forEach(method => {
+          val instLines = method.instructions.toArray.filter(_.isInstanceOf[LineNumberNode]).map(_.asInstanceOf[LineNumberNode]).map(_.line)
+          if (!instLines.isEmpty)
+            classSchema.add(new MethodSchema(method.name, method.desc, instLines.min, instLines.max))
+        })
+      classMethodProfiles.put(className, classSchema)
+    }
+
+    profileClass()
     val classNameFromReader = reader.getClassName
     val sourceFile = classNode.sourceFile
     val superClass = reader.getSuperName
