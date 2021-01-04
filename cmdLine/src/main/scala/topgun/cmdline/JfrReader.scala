@@ -31,11 +31,11 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     def writeAggregationOfView(view: AggregateView): Unit = {
       println(s"\n\n\nView : ${view.toString}")
       val viewName = view.name().toLowerCase.replace("_", "-")
-      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-allocations", callSitesList.filter(!_.desc.equals("ignore")).filter(_.view.equals(view)).filter(_.userDeratedAllocatedBytes.get > 0).sortBy(_.userDeratedAllocatedBytes.get))
-      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-CPU", callSitesList.filter(!_.desc.equals("ignore")).filter(_.view.equals(view)).filter(_.userDeratedCpu.get > 0).sortBy(_.userDeratedCpu.get))
-      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-CPU_Native", callSitesList.filter(!_.desc.equals("ignore")).filter(_.view.equals(view)).filter(_.nativeUserDeratedCpu.get > 0).sortBy(_.nativeUserDeratedCpu.get))
-      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-ALL", callSitesList.filter(!_.desc.equals("ignore")).filter(_.view.equals(view)).sortBy(_.FQN))
-
+      val newCallSiteList = callSitesList.filter(!_.desc.equals("ignore")).filter(_.view.equals(view))
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-allocations", newCallSiteList.filter(_.userDeratedAllocatedBytes.get > 0).sortBy(_.userDeratedAllocatedBytes.get))
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-CPU", newCallSiteList.filter(_.userDeratedCpu.get > 0).sortBy(_.userDeratedCpu.get))
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-CPU_Native", newCallSiteList.filter(_.nativeUserDeratedCpu.get > 0).sortBy(_.nativeUserDeratedCpu.get))
+      FileWriter.writeFile(cmdLine.outDir, s"${viewName}-ALL", newCallSiteList.sortBy(_.FQN))
       println("writing class allocation files")
       var classRecord = 0D
       val inc = 100.0D / callSitesList.size
@@ -89,5 +89,10 @@ class JfrReader(cmdLine: JfrParseCommandLine) {
     System.out.println(s"CPU        - consumed         ${totals.consumedCpuEventsNative}  events")
     System.out.println(s"CPU        - ignored (stack)  ${totals.ignoredStackCpuEventsNative}  events")
     System.out.println(s"CPU        - ignored (thread) ${totals.ignoredThreadCpuEventsNative}  events")
+
+    System.out.println("\nWriting CSVs to JSON object")
+    ExportHtml.exportHtml(cmdLine.outDir)
+    CsvToJsonWriter.writeToJson(outDir = cmdLine.outDir)
+    System.out.println("Done.")
   }
 }

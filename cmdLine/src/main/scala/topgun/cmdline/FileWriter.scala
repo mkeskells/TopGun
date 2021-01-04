@@ -1,7 +1,6 @@
 package topgun.cmdline
 
 import java.io._
-
 import topgun.core.{CallSite, ClassAllocations}
 
 import scala.collection.mutable
